@@ -1,3 +1,4 @@
+```yaml
 name: Build Tiles Hop Android APK
 
 on:
@@ -42,8 +43,12 @@ jobs:
       - name: Build web application
         run: bun run build
 
-      - name: Create Android project
-        run: bunx cap add android
+      - name: Verify Android project exists
+        run: |
+          if [ ! -f android/gradlew ]; then
+            echo "Android project or Gradle wrapper is missing."
+            exit 1
+          fi
 
       - name: Sync Capacitor
         run: bunx cap sync android
@@ -60,3 +65,4 @@ jobs:
           name: Tiles-Hop-Android-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+```
