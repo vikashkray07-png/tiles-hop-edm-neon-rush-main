@@ -48,7 +48,8 @@ export default function App() {
   // Online / Offline state. Android WebView can report navigator.onLine=true
   // even when mobile data/Wi-Fi has no internet, so confirm reachability too.
   const [isOnline, setIsOnline] = useState<boolean>(false);
-
+  const isOnlineRef = useRef(false);
+  isOnlineRef.current = isOnline;
   useEffect(() => {
     let disposed = false;
     let probeInFlight = false;
@@ -968,8 +969,23 @@ export default function App() {
 
         // No real ad provider is configured in this project. Never show a fake
         // interstitial or block level completion behind a demo timer.
-        setPhase('victory');
+         setPhase('victory');
         if (shouldShowReview) setShowReviewModal(true);
+
+        // Google test ad starts automatically on level complete.
+        // It never blocks progress: progress is already saved above.
+        if (isOnlineRef.current && !shouldShowReview) {
+          setAdModal({
+            isOpen: true,
+            type: 'level_complete',
+            onComplete: () => {
+              setAdModal((prev) => ({ ...prev, isOpen: false }));
+            },
+            onClose: () => {
+              setAdModal((prev) => ({ ...prev, isOpen: false }));
+            },
+          });
+        }
       },
       onPhaseChange: (newPhase) => {
         setPhase(newPhase);
