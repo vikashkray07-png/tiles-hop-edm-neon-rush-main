@@ -93,7 +93,7 @@ export const AdModal: React.FC<AdModalProps> = ({
 
   const header =
     type === 'skin_unlock'
-      ? GOOGLE TEST REWARD · SKIN (${adNumber}/${totalAds})
+      ? 'GOOGLE TEST REWARD · SKIN (' + adNumber + '/' + totalAds + ')'
       : type === 'continue_revive'
         ? 'GOOGLE TEST REWARD · REVIVE'
         : type === 'level_complete'
