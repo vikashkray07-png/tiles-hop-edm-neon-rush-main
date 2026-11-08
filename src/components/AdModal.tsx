@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ShieldAlert, X } from 'lucide-react';
@@ -74,6 +73,19 @@ export const AdModal: React.FC<AdModalProps> = ({
     }
   };
 
+  // Level-complete ad starts automatically (other ad types stay tap-to-play).
+  useEffect(() => {
+    if (type !== 'level_complete' || !Capacitor.isNativePlatform()) return;
+
+    // Small delay so the victory screen finishes drawing first.
+    const timer = window.setTimeout(() => {
+      void handleWatchAd();
+    }, 600);
+
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleClose = () => {
     if (busyRef.current || rewardedRef.current) return;
     onClose?.();
@@ -81,7 +93,7 @@ export const AdModal: React.FC<AdModalProps> = ({
 
   const header =
     type === 'skin_unlock'
-      ? `GOOGLE TEST REWARD · SKIN (${adNumber}/${totalAds})`
+      ? GOOGLE TEST REWARD · SKIN (${adNumber}/${totalAds})
       : type === 'continue_revive'
         ? 'GOOGLE TEST REWARD · REVIVE'
         : type === 'level_complete'
@@ -147,7 +159,9 @@ export const AdModal: React.FC<AdModalProps> = ({
 
         {status === 'ready' && (
           <p className="mb-4 text-sm text-white/60">
-            Tap below to request Google's test advertisement.
+            {type === 'level_complete' && Capacitor.isNativePlatform()
+              ? 'Starting Google test ad…'
+              : "Tap below to request Google's test advertisement."}
           </p>
         )}
 
