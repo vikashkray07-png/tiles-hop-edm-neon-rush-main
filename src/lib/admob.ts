@@ -18,6 +18,35 @@ let adReadyAt = 0;
 let preloadPromise: Promise<void> | null = null;
 const AD_READY_MAX_AGE_MS = 45 * 60 * 1000;
 
+// Confirms the phone really has internet right now.
+async function confirmInternet(): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    await fetch('https://www.gstatic.com/generate_204', {
+      method: 'GET',
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// When the phone goes offline, forget any preloaded ad: showing it offline
+// is what opens Google's blank white ad page.
+if (typeof window !== 'undefined') {
+  window.addEventListener('offline', () => {
+    adReady = false;
+  });
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
@@ -61,6 +90,7 @@ function adIsFresh(): boolean {
 
 // Safe to call any time: does nothing if an ad is already loaded or loading.
 export function preloadRewardedTestAd(): void {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
   if (adRequestInProgress || preloadPromise || adIsFresh()) return;
 
   preloadPromise = withTimeout(loadAd(), LOAD_TIMEOUT_MS, 'Rewarded ad preload')
@@ -80,6 +110,11 @@ export async function showRewardedTestAd(): Promise<boolean> {
   let rewarded = false;
 
   try {
+    if (!(await confirmInternet())) {
+      adReady = false;
+      return false;
+    }
+
     await initializeAdMob();
 
     let settleClosed: () => void = () => {};
