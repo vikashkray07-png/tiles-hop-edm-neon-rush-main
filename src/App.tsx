@@ -731,7 +731,10 @@ export default function App() {
   }, [isOnline, isAuthLoading, canonicalPlayerId]);
 
   // Real-time Firestore subscription with automatic deduplication & legacy consolidation
+  // (only active while the leaderboard screen is open, to keep the game smooth)
   useEffect(() => {
+    if (!showLeaderboard) return;
+
     let unsubscribe: (() => void) | undefined;
     let isMounted = true;
     setLeaderboardError(null);
@@ -886,7 +889,7 @@ export default function App() {
       clearTimeout(timeoutTimer);
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [showLeaderboard]);
 
   // First launch after update: prompt profile registration if not yet completed
   useEffect(() => {
@@ -967,9 +970,7 @@ export default function App() {
         // When Level 2 is completed for the first time, ask user for star review!
         const shouldShowReview = completedLevel.id === 2 && !localStorage.getItem('going_hop_reviewed_v22');
 
-        // No real ad provider is configured in this project. Never show a fake
-        // interstitial or block level completion behind a demo timer.
-         setPhase('victory');
+        setPhase('victory');
         if (shouldShowReview) setShowReviewModal(true);
 
         // Google test ad starts automatically on level complete.
@@ -979,9 +980,6 @@ export default function App() {
             isOpen: true,
             type: 'level_complete',
             onComplete: () => {
-              setAdModal((prev) => ({ ...prev, isOpen: false }));
-            },
-            onClose: () => {
               setAdModal((prev) => ({ ...prev, isOpen: false }));
             },
           });
@@ -997,6 +995,60 @@ export default function App() {
     return () => {
       engine.destroy();
       engineRef.current = null;
+    };
+  }, []);
+
+  // After the native ad screen closes, the 3D canvas can die on some phones.
+  // Detect that and restart the page so the player never stays on a black screen.
+  useEffect(() => {
+    const host = mountRef.current;
+    if (!host) return;
+
+    let timer: number | undefined;
+
+    const canvasIsDead = (): boolean => {
+      const canvas = host.querySelector('canvas');
+      if (!canvas) return false;
+      try {
+        const gl = (canvas.getContext('webgl2') || canvas.getContext('webgl')) as WebGLRenderingContext | null;
+        return Boolean(gl && gl.isContextLost());
+      } catch {
+        return false;
+      }
+    };
+
+    const reloadOnce = () => {
+      try {
+        const last = Number(sessionStorage.getItem('going_hop_last_recover') || '0');
+        if (Date.now() - last < 20000) return; // never loop
+        sessionStorage.setItem('going_hop_last_recover', String(Date.now()));
+      } catch {
+        // ignore
+      }
+      window.location.reload();
+    };
+
+    const check = (delay: number) => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (document.visibilityState === 'visible' && canvasIsDead()) reloadOnce();
+      }, delay);
+    };
+
+    const onLost = () => check(3000);
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      window.dispatchEvent(new Event('resize'));
+      check(1500);
+    };
+
+    host.addEventListener('webglcontextlost', onLost, true);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      window.clearTimeout(timer);
+      host.removeEventListener('webglcontextlost', onLost, true);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 
