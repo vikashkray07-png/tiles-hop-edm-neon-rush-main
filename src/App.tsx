@@ -994,7 +994,7 @@ export default function App() {
           window.setTimeout(() => setShowReviewModal(true), 500);
         };
 
-        if (isOnlineRef.current) {
+        if (isOnlineRef.current && navigator.onLine) {
           const finishAd = () => {
             setAdModal((prev) => ({ ...prev, isOpen: false }));
             showReviewLater();
