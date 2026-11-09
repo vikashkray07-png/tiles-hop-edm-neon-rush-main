@@ -32,7 +32,7 @@ const hasInternet = async (): Promise<boolean> => {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
 
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 2500);
+  const timer = window.setTimeout(() => controller.abort(), 4000);
   try {
     await fetch('https://www.gstatic.com/generate_204', {
       method: 'GET',
