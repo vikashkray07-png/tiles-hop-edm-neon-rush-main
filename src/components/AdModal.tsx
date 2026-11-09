@@ -23,6 +23,31 @@ interface AdModalProps {
 
 type AdStatus = 'ready' | 'loading' | 'error';
 
+// Whole ad flow (load + show) must never hang the game.
+const AD_FLOW_TIMEOUT_MS = 130000;
+
+// Confirms the phone really has internet before asking Google for an ad.
+// If it does not, we show our own message instead of Google's blank white page.
+const hasInternet = async (): Promise<boolean> => {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 2500);
+  try {
+    await fetch('https://www.gstatic.com/generate_204', {
+      method: 'GET',
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timer);
+  }
+};
+
 export const AdModal: React.FC<AdModalProps> = ({
   type,
   skinName,
@@ -53,12 +78,27 @@ export const AdModal: React.FC<AdModalProps> = ({
     setStatus('loading');
     setError('');
 
+    let timer: number | undefined;
+
     try {
-      const rewardEarned = await showRewardedTestAd();
+      if (!(await hasInternet())) {
+        setStatus('error');
+        setError('No internet connection. Please connect to the internet and try again.');
+        return;
+      }
+
+      const timeout = new Promise<boolean>((_, reject) => {
+        timer = window.setTimeout(
+          () => reject(new Error('Ad flow timed out')),
+          AD_FLOW_TIMEOUT_MS
+        );
+      });
+
+      const rewardEarned = await Promise.race([showRewardedTestAd(), timeout]);
 
       if (!rewardEarned) {
         setStatus('error');
-        setError('Ad reward was not confirmed. No game reward was granted.');
+        setError('Ad was not completed. No game reward was granted.');
         return;
       }
 
@@ -69,18 +109,23 @@ export const AdModal: React.FC<AdModalProps> = ({
       setStatus('error');
       setError('Google test ad failed. No reward was granted.');
     } finally {
+      if (timer !== undefined) window.clearTimeout(timer);
       busyRef.current = false;
     }
   };
 
-  // Level-complete ad starts automatically (other ad types stay tap-to-play).
+  // Every ad type now starts automatically as soon as it opens
+  // (no extra "WATCH TEST AD" tap needed).
   useEffect(() => {
-    if (type !== 'level_complete' || !Capacitor.isNativePlatform()) return;
+    if (!Capacitor.isNativePlatform()) return;
 
-    // Small delay so the victory screen finishes drawing first.
-    const timer = window.setTimeout(() => {
-      void handleWatchAd();
-    }, 600);
+    // Small delay so the screen behind finishes drawing first.
+    const timer = window.setTimeout(
+      () => {
+        void handleWatchAd();
+      },
+      type === 'level_complete' ? 600 : 150
+    );
 
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -90,6 +135,17 @@ export const AdModal: React.FC<AdModalProps> = ({
     if (busyRef.current || rewardedRef.current) return;
     onClose?.();
   };
+
+  // While the ad is starting we only show a plain dark screen, no card.
+  if (status !== 'error') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90">
+        <p className="text-sm font-semibold tracking-widest text-cyan-300">
+          Loading ad…
+        </p>
+      </div>
+    );
+  }
 
   const header =
     type === 'skin_unlock'
@@ -113,8 +169,7 @@ export const AdModal: React.FC<AdModalProps> = ({
             <button
               type="button"
               onClick={handleClose}
-              disabled={status === 'loading'}
-              className="rounded-full bg-white/10 p-2 disabled:opacity-40"
+              className="rounded-full bg-white/10 p-2"
               aria-label="Close ad"
             >
               <X size={18} />
@@ -128,13 +183,8 @@ export const AdModal: React.FC<AdModalProps> = ({
         />
 
         <h2 className="mb-2 text-2xl font-black">
-          Google Rewarded Test Ad
+          Ad Unavailable
         </h2>
-
-        <p className="mb-4 text-sm text-white/70">
-          This uses Google's official test advertisement.
-          It is not a real commercial advertisement.
-        </p>
 
         {skinName && type === 'skin_unlock' && (
           <p className="mb-4 text-sm text-cyan-300">
@@ -145,56 +195,25 @@ export const AdModal: React.FC<AdModalProps> = ({
           </p>
         )}
 
-        {status === 'loading' && (
-          <p className="mb-4 text-sm text-cyan-300">
-            Loading or showing the test ad. Please wait…
-          </p>
-        )}
+        <p role="alert" className="mb-5 text-sm text-red-300">
+          {error}
+        </p>
 
-        {status === 'error' && (
-          <p role="alert" className="mb-4 text-sm text-red-300">
-            {error}
-          </p>
-        )}
-
-        {status === 'ready' && (
-          <p className="mb-4 text-sm text-white/60">
-            {type === 'level_complete' && Capacitor.isNativePlatform()
-              ? 'Starting Google test ad…'
-              : "Tap below to request Google's test advertisement."}
-          </p>
-        )}
-
-        <button
-          type="button"
-          onClick={handleWatchAd}
-          disabled={status !== 'ready'}
-          className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {status === 'loading'
-            ? 'PLEASE WAIT…'
-            : status === 'error'
-              ? 'AD UNAVAILABLE'
-              : 'WATCH TEST AD'}
-        </button>
-
-        {status === 'error' && Capacitor.isNativePlatform() && (
+        {Capacitor.isNativePlatform() && (
           <button
             type="button"
             onClick={() => {
-              setError('');
-              setStatus('ready');
+              void handleWatchAd();
             }}
-            className="mt-3 text-sm font-semibold text-cyan-300 underline"
+            className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 py-3 font-black text-white"
           >
-            Try Again
+            TRY AGAIN
           </button>
         )}
 
         <p className="mt-4 text-[10px] text-white/40">
-          Rewards are granted only after successful confirmation
-          from the rewarded-ad function. Failed or dismissed ads
-          grant no reward.
+          Rewards are granted only after the ad is completed.
+          Failed or dismissed ads grant no reward.
         </p>
       </div>
     </div>
