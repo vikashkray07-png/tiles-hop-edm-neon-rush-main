@@ -11,6 +11,13 @@ const SHOW_TIMEOUT_MS = 120000;
 let initializationPromise: Promise<void> | null = null;
 let adRequestInProgress = false;
 
+// A preloaded ad is kept ready in the background so it opens instantly
+// (no waiting time and no blank page while the ad loads).
+let adReady = false;
+let adReadyAt = 0;
+let preloadPromise: Promise<void> | null = null;
+const AD_READY_MAX_AGE_MS = 45 * 60 * 1000;
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
@@ -41,6 +48,30 @@ async function initializeAdMob(): Promise<void> {
   }
 }
 
+async function loadAd(): Promise<void> {
+  await initializeAdMob();
+  await AdMob.prepareRewardVideoAd({ adId: TEST_REWARDED_AD_ID, isTesting: true });
+  adReady = true;
+  adReadyAt = Date.now();
+}
+
+function adIsFresh(): boolean {
+  return adReady && Date.now() - adReadyAt < AD_READY_MAX_AGE_MS;
+}
+
+// Safe to call any time: does nothing if an ad is already loaded or loading.
+export function preloadRewardedTestAd(): void {
+  if (adRequestInProgress || preloadPromise || adIsFresh()) return;
+
+  preloadPromise = withTimeout(loadAd(), LOAD_TIMEOUT_MS, 'Rewarded ad preload')
+    .catch(() => {
+      adReady = false;
+    })
+    .finally(() => {
+      preloadPromise = null;
+    });
+}
+
 export async function showRewardedTestAd(): Promise<boolean> {
   if (adRequestInProgress) return false;
   adRequestInProgress = true;
@@ -62,11 +93,16 @@ export async function showRewardedTestAd(): Promise<boolean> {
       console.warn('Rewarded ad listeners unavailable:', listenerError);
     }
 
-    await withTimeout(
-      AdMob.prepareRewardVideoAd({ adId: TEST_REWARDED_AD_ID, isTesting: true }),
-      LOAD_TIMEOUT_MS,
-      'Rewarded ad load'
-    );
+    // Use the preloaded ad if there is one, otherwise load now.
+    if (preloadPromise) {
+      try { await preloadPromise; } catch { /* handled below */ }
+    }
+    if (!adIsFresh()) {
+      await withTimeout(loadAd(), LOAD_TIMEOUT_MS, 'Rewarded ad load');
+    }
+
+    // The loaded ad is used up once shown.
+    adReady = false;
 
     const showPromise = AdMob.showRewardVideoAd()
       .then((reward) => {
@@ -78,6 +114,7 @@ export async function showRewardedTestAd(): Promise<boolean> {
 
     return rewarded;
   } catch (error) {
+    adReady = false;
     console.error('Rewarded test ad failed:', error);
     return rewarded;
   } finally {
@@ -85,5 +122,7 @@ export async function showRewardedTestAd(): Promise<boolean> {
       try { await handle.remove(); } catch { /* ignore */ }
     }
     adRequestInProgress = false;
+    // Start loading the next ad in the background.
+    setTimeout(() => preloadRewardedTestAd(), 2500);
   }
 }
