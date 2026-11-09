@@ -12,6 +12,7 @@ import { SkinShopModal } from './components/SkinShopModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { AdModal, AdType } from './components/AdModal';
+import { preloadRewardedTestAd } from './lib/admob';
 import { ReviewModal } from './components/ReviewModal';
 import { DailyChallengeModal } from './components/DailyChallengeModal';
 import { DailyRaceResultsModal } from './components/DailyRaceResultsModal';
@@ -53,6 +54,7 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let probeInFlight = false;
+    let failedChecks = 0;
 
     const verifyInternet = async () => {
       if (disposed || probeInFlight) return;
@@ -63,7 +65,7 @@ export default function App() {
 
       probeInFlight = true;
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 2500);
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
       try {
         // A no-cors request is sufficient: success means the request reached
         // the internet; offline/DNS/network failures reject the fetch.
@@ -73,9 +75,12 @@ export default function App() {
           cache: 'no-store',
           signal: controller.signal,
         });
+        failedChecks = 0;
         if (!disposed) setIsOnline(true);
       } catch {
-        if (!disposed) setIsOnline(false);
+        // One failed check can just be a slow network. Only go offline after two in a row.
+        failedChecks += 1;
+        if (!disposed && failedChecks >= 2) setIsOnline(false);
       } finally {
         window.clearTimeout(timeout);
         probeInFlight = false;
@@ -83,7 +88,10 @@ export default function App() {
     };
 
     const handleOnline = () => { void verifyInternet(); };
-    const handleOffline = () => setIsOnline(false);
+    const handleOffline = () => {
+      failedChecks = 2;
+      setIsOnline(false);
+    };
     const handleVisible = () => {
       if (document.visibilityState === 'visible') void verifyInternet();
     };
@@ -149,6 +157,12 @@ export default function App() {
       setAdModal((current) => current.isOpen ? { ...current, isOpen: false } : current);
     }
   }, [isOnline]);
+
+  // Keep one Google test ad loaded in the background so it opens instantly
+  // (no long wait and no blank page while it loads).
+  useEffect(() => {
+    if (isOnline) preloadRewardedTestAd();
+  }, [isOnline, phase]);
 
   // Cached local progress for instant first frame
   const initialProgress = useRef<PlayerProgressState>(loadLocalPlayerProgress()).current;
@@ -971,18 +985,27 @@ export default function App() {
         const shouldShowReview = completedLevel.id === 2 && !localStorage.getItem('going_hop_reviewed_v22');
 
         setPhase('victory');
-        if (shouldShowReview) setShowReviewModal(true);
 
-        // Google test ad starts automatically on level complete.
-        // It never blocks progress: progress is already saved above.
-        if (isOnlineRef.current && !shouldShowReview) {
+        // Level-complete flow: Google test ad first (starts automatically),
+        // and the rating popup only AFTER the ad is finished. They never
+        // open together, so the screen cannot crash or go blank.
+        const showReviewLater = () => {
+          if (!shouldShowReview) return;
+          window.setTimeout(() => setShowReviewModal(true), 500);
+        };
+
+        if (isOnlineRef.current) {
+          const finishAd = () => {
+            setAdModal((prev) => ({ ...prev, isOpen: false }));
+            showReviewLater();
+          };
           setAdModal({
             isOpen: true,
             type: 'level_complete',
-            onComplete: () => {
-              setAdModal((prev) => ({ ...prev, isOpen: false }));
-            },
+            onComplete: finishAd,
           });
+        } else {
+          showReviewLater();
         }
       },
       onPhaseChange: (newPhase) => {
@@ -1614,7 +1637,13 @@ export default function App() {
             adModal.onComplete?.();
           }}
           onClose={() => {
-            setAdModal((prev) => ({ ...prev, isOpen: false }));
+            if (adModal.type === 'level_complete') {
+              // Closing the level-complete ad continues to the normal next step
+              // (rating popup, if due).
+              adModal.onComplete?.();
+            } else {
+              setAdModal((prev) => ({ ...prev, isOpen: false }));
+            }
           }}
         />
       )}
