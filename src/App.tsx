@@ -12,7 +12,7 @@ import { SkinShopModal } from './components/SkinShopModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { AdModal, AdType } from './components/AdModal';
-import { hasReliableInternet, preloadRewardedTestAd } from './lib/admob';
+import { hasReliableInternet } from './lib/admob';
 import { ReviewModal } from './components/ReviewModal';
 import { DailyChallengeModal } from './components/DailyChallengeModal';
 import { DailyRaceResultsModal } from './components/DailyRaceResultsModal';
@@ -157,12 +157,6 @@ export default function App() {
       setAdModal((current) => current.isOpen ? { ...current, isOpen: false } : current);
     }
   }, [isOnline]);
-
-  // Keep one Google test ad loaded in the background so it opens instantly
-  // (no long wait and no blank page while it loads).
-  useEffect(() => {
-    if (isOnline) preloadRewardedTestAd();
-  }, [isOnline, phase]);
 
   // Cached local progress for instant first frame
   const initialProgress = useRef<PlayerProgressState>(loadLocalPlayerProgress()).current;
