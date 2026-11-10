@@ -12,7 +12,7 @@ import { SkinShopModal } from './components/SkinShopModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { AdModal, AdType } from './components/AdModal';
-import { preloadRewardedTestAd } from './lib/admob';
+import { hasReliableInternet, preloadRewardedTestAd } from './lib/admob';
 import { ReviewModal } from './components/ReviewModal';
 import { DailyChallengeModal } from './components/DailyChallengeModal';
 import { DailyRaceResultsModal } from './components/DailyRaceResultsModal';
@@ -994,7 +994,15 @@ export default function App() {
           window.setTimeout(() => setShowReviewModal(true), 500);
         };
 
-        if (isOnlineRef.current && navigator.onLine) {
+        // Do a fresh reachability check at the exact moment the level ends.
+        // Android WebView can keep navigator.onLine=true after Wi-Fi/mobile data
+        // has been switched off, which otherwise launches a blank AdMob screen.
+        const canShowLevelAd =
+          isOnlineRef.current &&
+          (typeof navigator === 'undefined' || navigator.onLine) &&
+          (await hasReliableInternet());
+
+        if (canShowLevelAd) {
           const finishAd = () => {
             setAdModal((prev) => ({ ...prev, isOpen: false }));
             showReviewLater();
@@ -1021,56 +1029,28 @@ export default function App() {
     };
   }, []);
 
-  // After the native ad screen closes, the 3D canvas can die on some phones.
-  // Detect that and restart the page so the player never stays on a black screen.
+  // Let Three.js handle WebGL context restoration. Do not reload the whole
+  // WebView after an ad closes: that can tear down the game and appear as a crash.
   useEffect(() => {
     const host = mountRef.current;
     if (!host) return;
 
-    let timer: number | undefined;
-
-    const canvasIsDead = (): boolean => {
-      const canvas = host.querySelector('canvas');
-      if (!canvas) return false;
-      try {
-        const gl = (canvas.getContext('webgl2') || canvas.getContext('webgl')) as WebGLRenderingContext | null;
-        return Boolean(gl && gl.isContextLost());
-      } catch {
-        return false;
-      }
-    };
-
-    const reloadOnce = () => {
-      try {
-        const last = Number(sessionStorage.getItem('going_hop_last_recover') || '0');
-        if (Date.now() - last < 20000) return; // never loop
-        sessionStorage.setItem('going_hop_last_recover', String(Date.now()));
-      } catch {
-        // ignore
-      }
-      window.location.reload();
-    };
-
-    const check = (delay: number) => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        if (document.visibilityState === 'visible' && canvasIsDead()) reloadOnce();
-      }, delay);
-    };
-
-    const onLost = () => check(3000);
-    const onVisible = () => {
-      if (document.visibilityState !== 'visible') return;
+    const onContextRestored = () => {
+      // Recalculate the drawing size after Android returns from the native ad screen.
       window.dispatchEvent(new Event('resize'));
-      check(1500);
     };
 
-    host.addEventListener('webglcontextlost', onLost, true);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        window.dispatchEvent(new Event('resize'));
+      }
+    };
+
+    host.addEventListener('webglcontextrestored', onContextRestored, true);
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
-      window.clearTimeout(timer);
-      host.removeEventListener('webglcontextlost', onLost, true);
+      host.removeEventListener('webglcontextrestored', onContextRestored, true);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
