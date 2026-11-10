@@ -19,7 +19,7 @@ let preloadPromise: Promise<void> | null = null;
 const AD_READY_MAX_AGE_MS = 45 * 60 * 1000;
 
 // Confirms the phone really has internet right now.
-async function confirmInternet(): Promise<boolean> {
+export async function hasReliableInternet(): Promise<boolean> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
 
   const controller = new AbortController();
@@ -49,7 +49,7 @@ if (typeof window !== 'undefined') {
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    const timer = setTimeout(() => reject(new Error(${label} timed out)), ms);
     promise.then(
       (value) => { clearTimeout(timer); resolve(value); },
       (error) => { clearTimeout(timer); reject(error); }
@@ -79,7 +79,14 @@ async function initializeAdMob(): Promise<void> {
 
 async function loadAd(): Promise<void> {
   await initializeAdMob();
+  // Never ask the native SDK to load an ad unless the network is reachable.
+  if (!(await hasReliableInternet())) throw new Error('No internet connection');
   await AdMob.prepareRewardVideoAd({ adId: TEST_REWARDED_AD_ID, isTesting: true });
+  // Connectivity may disappear while Google is preparing the ad.
+  if (!(await hasReliableInternet())) {
+    adReady = false;
+    throw new Error('Internet connection was lost while loading the ad');
+  }
   adReady = true;
   adReadyAt = Date.now();
 }
@@ -90,10 +97,21 @@ function adIsFresh(): boolean {
 
 // Safe to call any time: does nothing if an ad is already loaded or loading.
 export function preloadRewardedTestAd(): void {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    adReady = false;
+    return;
+  }
   if (adRequestInProgress || preloadPromise || adIsFresh()) return;
 
-  preloadPromise = withTimeout(loadAd(), LOAD_TIMEOUT_MS, 'Rewarded ad preload')
+  // navigator.onLine can be stale in Android WebView; verify actual reachability.
+  preloadPromise = hasReliableInternet()
+    .then((online) => {
+      if (!online) {
+        adReady = false;
+        return Promise.resolve();
+      }
+      return withTimeout(loadAd(), LOAD_TIMEOUT_MS, 'Rewarded ad preload');
+    })
     .catch(() => {
       adReady = false;
     })
@@ -110,7 +128,7 @@ export async function showRewardedTestAd(): Promise<boolean> {
   let rewarded = false;
 
   try {
-    if (!(await confirmInternet())) {
+    if (!(await hasReliableInternet())) {
       adReady = false;
       return false;
     }
@@ -136,6 +154,14 @@ export async function showRewardedTestAd(): Promise<boolean> {
       await withTimeout(loadAd(), LOAD_TIMEOUT_MS, 'Rewarded ad load');
     }
 
+    // Re-check immediately before opening Google's native ad screen. This
+    // prevents the blank white ad Activity when the phone went offline
+    // during preload or while the ad was loading.
+    if (!(await hasReliableInternet())) {
+      adReady = false;
+      return false;
+    }
+
     // The loaded ad is used up once shown.
     adReady = false;
 
@@ -157,7 +183,10 @@ export async function showRewardedTestAd(): Promise<boolean> {
       try { await handle.remove(); } catch { /* ignore */ }
     }
     adRequestInProgress = false;
-    // Start loading the next ad in the background.
-    setTimeout(() => preloadRewardedTestAd(), 2500);
+    // Only preload another ad when the phone is still online. The preload
+    // function also performs a real reachability check (not just navigator.onLine).
+    if (typeof navigator === 'undefined' || navigator.onLine) {
+      setTimeout(() => preloadRewardedTestAd(), 2500);
+    }
   }
 }
