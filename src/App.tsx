@@ -152,12 +152,8 @@ export default function App() {
     type: 'level_complete',
   });
 
-  useEffect(() => {
-    if (!isOnline) {
-      setAdModal((current) => current.isOpen ? { ...current, isOpen: false } : current);
-    }
-  }, [isOnline]);
-
+  // Do not unmount AdModal on a network transition. The native AdMob Activity
+  // may still be opening/showing; AdModal handles connectivity failures itself.
   // Cached local progress for instant first frame
   const initialProgress = useRef<PlayerProgressState>(loadLocalPlayerProgress()).current;
 
