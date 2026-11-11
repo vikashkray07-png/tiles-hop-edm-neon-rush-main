@@ -959,7 +959,8 @@ export default function App() {
         const nextLevel = LEVELS[nextLevelId - 1];
         setCurrentLevel(nextLevel);
         currentLevelRef.current = nextLevel;
-        engineRef.current?.setLevel(nextLevel, false);
+        // Do not rebuild the Three.js world during the victory transition.
+        // The next level is loaded by handleNextLevel when the player taps Next Target.
 
         saveLocalPlayerProgress({
           maxUnlockedLevel: updatedMax,
