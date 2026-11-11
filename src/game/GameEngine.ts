@@ -241,9 +241,6 @@ export class GameEngine {
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.shadowMap.enabled = false;
     this.container.appendChild(this.renderer.domElement);
-    this.renderer.domElement.addEventListener('webglcontextlost', this.handleWebGLContextLost, false);
-    this.renderer.domElement.addEventListener('webglcontextrestored', this.handleWebGLContextRestored, false);
-
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.currentLevelConfig.bgTop || 0x38bdf8);
     this.camera = new THREE.PerspectiveCamera(56, width / height, 0.1, 160);
@@ -252,6 +249,9 @@ export class GameEngine {
     this.camera.lookAt(0, 2.0, 5.0);
 
     this.clock = new THREE.Clock();
+
+    this.renderer.domElement.addEventListener('webglcontextlost', this.handleWebGLContextLost, false);
+    this.renderer.domElement.addEventListener('webglcontextrestored', this.handleWebGLContextRestored, false);
 
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
