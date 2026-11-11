@@ -108,6 +108,28 @@ export class GameEngine {
   private camera: THREE.PerspectiveCamera;
   private clock: THREE.Clock;
   private animFrameId: number | null = null;
+  private isWebGLContextLost = false;
+
+  private handleWebGLContextLost = (event: Event) => {
+    // Allow the browser to restore the existing context; do not render into a lost context.
+    event.preventDefault();
+    this.isWebGLContextLost = true;
+    if (this.animFrameId !== null) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
+    }
+  };
+
+  private handleWebGLContextRestored = () => {
+    this.isWebGLContextLost = false;
+    this.clock.start();
+    const width = this.container.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || window.innerHeight;
+    this.renderer.setSize(width, height);
+    this.camera.aspect = width / Math.max(1, height);
+    this.camera.updateProjectionMatrix();
+    this.startLoop();
+  };
 
   // Lighting & Environment
   private hemiLight!: THREE.HemisphereLight;
@@ -219,6 +241,8 @@ export class GameEngine {
     this.renderer.toneMappingExposure = 1.15;
     this.renderer.shadowMap.enabled = false;
     this.container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.addEventListener('webglcontextlost', this.handleWebGLContextLost, false);
+    this.renderer.domElement.addEventListener('webglcontextrestored', this.handleWebGLContextRestored, false);
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.currentLevelConfig.bgTop || 0x38bdf8);
@@ -1761,6 +1785,8 @@ export class GameEngine {
 
   private setupEventListeners() {
     const el = this.renderer.domElement;
+    el.removeEventListener('webglcontextlost', this.handleWebGLContextLost, false);
+    el.removeEventListener('webglcontextrestored', this.handleWebGLContextRestored, false);
 
     this.onPointerDownHandler = (e: PointerEvent) => {
       if (this.phase === 'title') {
@@ -2067,7 +2093,12 @@ export class GameEngine {
   // --- 60 FPS SIMULATION LOOP ---
 
   private startLoop() {
+    if (this.isWebGLContextLost || this.animFrameId !== null) return;
     const animate = () => {
+      if (this.isWebGLContextLost) {
+        this.animFrameId = null;
+        return;
+      }
       this.animFrameId = requestAnimationFrame(animate);
       const rawDt = this.clock.getDelta();
       const dt = Math.min(rawDt, 0.05);
