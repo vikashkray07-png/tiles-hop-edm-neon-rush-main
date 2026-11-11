@@ -170,7 +170,14 @@ export async function showRewardedTestAd(): Promise<boolean> {
       })
       .catch((error) => console.error('Rewarded test ad show failed:', error));
 
-    await withTimeout(Promise.race([showPromise, closed]), SHOW_TIMEOUT_MS, 'Rewarded ad show');
+    // The native show call can resolve as soon as the reward is earned,
+    // while the full-screen ad is still visible. Do not remove listeners or
+    // let the game continue until Android confirms the ad was dismissed.
+    await withTimeout(
+      Promise.all([showPromise, closed]),
+      SHOW_TIMEOUT_MS,
+      'Rewarded ad dismissal'
+    );
 
     return rewarded;
   } catch (error) {
