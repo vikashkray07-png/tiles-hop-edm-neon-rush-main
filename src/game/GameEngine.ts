@@ -1785,8 +1785,6 @@ export class GameEngine {
 
   private setupEventListeners() {
     const el = this.renderer.domElement;
-    el.removeEventListener('webglcontextlost', this.handleWebGLContextLost, false);
-    el.removeEventListener('webglcontextrestored', this.handleWebGLContextRestored, false);
 
     this.onPointerDownHandler = (e: PointerEvent) => {
       if (this.phase === 'title') {
@@ -2672,6 +2670,8 @@ export class GameEngine {
       this.animFrameId = null;
     }
     const el = this.renderer.domElement;
+    el.removeEventListener('webglcontextlost', this.handleWebGLContextLost, false);
+    el.removeEventListener('webglcontextrestored', this.handleWebGLContextRestored, false);
     if (el && this.onPointerDownHandler) {
       el.removeEventListener('pointerdown', this.onPointerDownHandler);
     }
