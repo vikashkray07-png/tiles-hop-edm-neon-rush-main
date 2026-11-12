@@ -109,6 +109,30 @@ export class GameEngine {
   private clock: THREE.Clock;
   private animFrameId: number | null = null;
   private isWebGLContextLost = false;
+  private isPageVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
+
+  // AdMob opens a native full-screen Activity. Pause the WebGL loop while
+  // Android backgrounds this WebView, then resize and resume on return.
+  private handleVisibilityChange = () => {
+    this.isPageVisible = document.visibilityState === 'visible';
+    if (!this.isPageVisible) {
+      if (this.animFrameId !== null) {
+        cancelAnimationFrame(this.animFrameId);
+        this.animFrameId = null;
+      }
+      this.clock.stop();
+      return;
+    }
+
+    if (this.isWebGLContextLost) return;
+    const width = this.container.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || window.innerHeight;
+    this.renderer.setSize(width, height);
+    this.camera.aspect = width / Math.max(1, height);
+    this.camera.updateProjectionMatrix();
+    this.clock.start();
+    this.startLoop();
+  };
 
   private handleWebGLContextLost = (event: Event) => {
     // Allow the browser to restore the existing context; do not render into a lost context.
@@ -128,7 +152,7 @@ export class GameEngine {
     this.renderer.setSize(width, height);
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
-    this.startLoop();
+    if (this.isPageVisible) this.startLoop();
   };
 
   // Lighting & Environment
@@ -252,6 +276,7 @@ export class GameEngine {
 
     this.renderer.domElement.addEventListener('webglcontextlost', this.handleWebGLContextLost, false);
     this.renderer.domElement.addEventListener('webglcontextrestored', this.handleWebGLContextRestored, false);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
 
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -2091,9 +2116,9 @@ export class GameEngine {
   // --- 60 FPS SIMULATION LOOP ---
 
   private startLoop() {
-    if (this.isWebGLContextLost || this.animFrameId !== null) return;
+    if (this.isWebGLContextLost || !this.isPageVisible || this.animFrameId !== null) return;
     const animate = () => {
-      if (this.isWebGLContextLost) {
+      if (this.isWebGLContextLost || !this.isPageVisible) {
         this.animFrameId = null;
         return;
       }
@@ -2672,6 +2697,7 @@ export class GameEngine {
     const el = this.renderer.domElement;
     el.removeEventListener('webglcontextlost', this.handleWebGLContextLost, false);
     el.removeEventListener('webglcontextrestored', this.handleWebGLContextRestored, false);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     if (el && this.onPointerDownHandler) {
       el.removeEventListener('pointerdown', this.onPointerDownHandler);
     }
