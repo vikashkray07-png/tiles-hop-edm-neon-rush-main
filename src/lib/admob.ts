@@ -48,7 +48,7 @@ if (typeof window !== 'undefined') {
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    const timer = setTimeout(() => reject(new Error(${label} timed out)), ms);
     promise.then(
       (value) => { clearTimeout(timer); resolve(value); },
       (error) => { clearTimeout(timer); reject(error); }
@@ -134,15 +134,27 @@ export async function showRewardedTestAd(): Promise<boolean> {
 
     await initializeAdMob();
 
-    let settleClosed: () => void = () => {};
-    const closed = new Promise<void>((resolve) => { settleClosed = resolve; });
+    let settleClosed!: () => void;
+    let failToShow!: (error: Error) => void;
+    const closed = new Promise<void>((resolve, reject) => {
+      settleClosed = resolve;
+      failToShow = reject;
+    });
 
+    // Register lifecycle listeners before loading/showing. If dismissal
+    // cannot be observed, do not open a full-screen ad: the game must never
+    // guess that the native Activity has closed.
     try {
       handles.push(await AdMob.addListener(RewardAdPluginEvents.Rewarded, () => { rewarded = true; }));
       handles.push(await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => settleClosed()));
-      handles.push(await AdMob.addListener(RewardAdPluginEvents.FailedToShow, () => settleClosed()));
+      handles.push(await AdMob.addListener(RewardAdPluginEvents.FailedToShow, () => {
+        adReady = false;
+        failToShow(new Error('Rewarded ad failed to show'));
+      }));
     } catch (listenerError) {
-      console.warn('Rewarded ad listeners unavailable:', listenerError);
+      console.warn('Rewarded ad lifecycle listeners unavailable:', listenerError);
+      adReady = false;
+      return false;
     }
 
     // Use the preloaded ad if there is one, otherwise load now.
@@ -164,15 +176,14 @@ export async function showRewardedTestAd(): Promise<boolean> {
     // The loaded ad is used up once shown.
     adReady = false;
 
-    const showPromise = AdMob.showRewardVideoAd()
-      .then((reward) => {
-        if (typeof reward?.amount === 'number' && reward.amount > 0) rewarded = true;
-      })
-      .catch((error) => console.error('Rewarded test ad show failed:', error));
+    const showPromise = AdMob.showRewardVideoAd().then((reward) => {
+      if (typeof reward?.amount === 'number' && reward.amount > 0) rewarded = true;
+    });
 
-    // The native show call can resolve as soon as the reward is earned,
-    // while the full-screen ad is still visible. Do not remove listeners or
-    // let the game continue until Android confirms the ad was dismissed.
+    // Some plugin versions resolve the native show Promise when the reward
+    // callback fires, before the fullscreen Activity is dismissed. Wait for
+    // BOTH the show result and the Dismissed event. A timeout/failure never
+    // grants a reward, even if a reward callback arrived earlier.
     await withTimeout(
       Promise.all([showPromise, closed]),
       SHOW_TIMEOUT_MS,
@@ -183,7 +194,7 @@ export async function showRewardedTestAd(): Promise<boolean> {
   } catch (error) {
     adReady = false;
     console.error('Rewarded test ad failed:', error);
-    return rewarded;
+    return false;
   } finally {
     for (const handle of handles) {
       try { await handle.remove(); } catch { /* ignore */ }
